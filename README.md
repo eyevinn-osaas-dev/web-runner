@@ -86,6 +86,35 @@ Environment variables from the Application Config Service are loaded **before** 
 
 For frameworks like Next.js that require environment variables during the build step (e.g. `NEXT_PUBLIC_*`), set them in your Application Config Service parameter store and they will be embedded in the build output automatically.
 
+### Private npm dependencies
+
+Dependency installation (`npm install`) runs in `docker-entrypoint.sh` at container start, after Application Config Service values have been exported into the environment. This means private npm packages already work with no extra runner support: commit an `.npmrc` with a registry-scoped token, and provide the token value via the Application Config Service (as a secret parameter) or via env vars for local `docker run` usage.
+
+```
+//registry.npmjs.org/:_authToken=${NPM_TOKEN}
+```
+
+or for GitHub Packages:
+
+```
+@myscope:registry=https://npm.pkg.github.com/
+//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+```
+
+Notes:
+
+- Tokens must be registry-scoped (`//host/path/:_authToken=`); a bare unscoped token is invalid.
+- An unresolved `${VAR}` is not treated as an error by npm, it's passed through literally and the registry will reject it as an auth failure (401), not a "missing variable" error. Double check the name matches the parameter/env var exactly.
+- Only `npm install` is run against `package-lock.json`; pnpm/yarn-specific auth files are not read, use npm's `.npmrc` syntax regardless of your local package manager.
+- With `SUB_PATH` set, place `.npmrc` inside the sub-path directory, since that's where `npm install` runs. The runner also writes config values to `.env.osc` in that directory, but that file is not consulted by npm.
+
+### Node version and package manager detection
+
+The container defaults to Node.js 24 and `npm`, but honors two standard fields in the deployed app's `package.json`:
+
+- **`engines.node`** — if the declared major version differs from the image default, the container switches to a bundled alternate Node major (18, 20, or 22) before installing and building. If the requested major isn't bundled, or the field can't be parsed, the image default is used.
+- **`packageManager`** (the [Corepack](https://nodejs.org/api/corepack.html) field, e.g. `"pnpm@9.12.0"` or `"yarn@4.5.0"`) — when present, `pnpm` or `yarn` is used for install/build/start instead of `npm`. When absent, behavior is unchanged: `npm install --include=dev` and `npm run build`/`build:app` as before.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
